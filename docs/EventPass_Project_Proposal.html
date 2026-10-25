@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EventPass - Formal Project Proposal Document</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #4338ca;
+      --primary-light: #6366f1;
+      --secondary: #0ea5e9;
+      --text-dark: #0f172a;
+      --text-muted: #475569;
+      --bg-page: #f8fafc;
+      --bg-card: #ffffff;
+      --border-color: #e2e8f0;
+      --badge-bg: #e0e7ff;
+      --badge-text: #3730a3;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--bg-page);
+      color: var(--text-dark);
+      line-height: 1.65;
+      padding: 2rem 1rem;
+    }
+
+    .toolbar {
+      max-width: 850px;
+      margin: 0 auto 1.5rem auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #ffffff;
+      padding: 0.75rem 1.25rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+      border: 1px solid var(--border-color);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--primary);
+      color: #ffffff;
+      padding: 0.6rem 1.2rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+
+    .btn:hover {
+      background: var(--primary-light);
+      transform: translateY(-1px);
+    }
+
+    .document-container {
+      max-width: 850px;
+      margin: 0 auto;
+      background: var(--bg-card);
+      padding: 3.5rem 4rem;
+      border-radius: 16px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01);
+      border: 1px solid var(--border-color);
+    }
+
+    .header-badge {
+      display: inline-block;
+      background: var(--badge-bg);
+      color: var(--badge-text);
+      font-weight: 700;
+      font-size: 0.75rem;
+      padding: 0.35rem 0.85rem;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 1.25rem;
+    }
+
+    h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 2.25rem;
+      color: #0f172a;
+      line-height: 1.25;
+      font-weight: 800;
+      margin-bottom: 0.75rem;
+    }
+
+    .subtitle {
+      font-size: 1.15rem;
+      color: var(--text-muted);
+      font-weight: 400;
+      margin-bottom: 2rem;
+      border-bottom: 2px solid var(--border-color);
+      padding-bottom: 1.5rem;
+    }
+
+    h2 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.35rem;
+      color: #1e1b4b;
+      margin-top: 2rem;
+      margin-bottom: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    h3 {
+      font-size: 1.05rem;
+      color: #334155;
+      margin-top: 1.25rem;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+    }
+
+    p {
+      margin-bottom: 1rem;
+      color: #334155;
+    }
+
+    ul, ol {
+      margin-left: 1.5rem;
+      margin-bottom: 1.25rem;
+      color: #334155;
+    }
+
+    li {
+      margin-bottom: 0.4rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.25rem 0 1.75rem 0;
+      font-size: 0.9rem;
+    }
+
+    th, td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    th {
+      background-color: #f8fafc;
+      color: #1e293b;
+      font-weight: 600;
+    }
+
+    tr:hover td {
+      background-color: #f1f5f9;
+    }
+
+    .diagram-box {
+      background: #0f172a;
+      color: #38bdf8;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      padding: 1.25rem;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 1.5rem 0;
+      line-height: 1.4;
+    }
+
+    .callout {
+      background: #eff6ff;
+      border-left: 4px solid var(--secondary);
+      padding: 1rem 1.25rem;
+      border-radius: 0 8px 8px 0;
+      margin: 1.5rem 0;
+      font-size: 0.95rem;
+      color: #1e3a8a;
+    }
+
+    /* @page margin: 0 completely strips browser default headers/footers (file URL location, timestamps) */
+    @page {
+      size: A4 portrait;
+      margin: 0;
+    }
+
+    @media print {
+      html, body {
+        background: #ffffff !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .toolbar {
+        display: none !important;
+      }
+      .document-container {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 2.2cm 2.5cm !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="toolbar">
+    <div>
+      <strong>BSIT Project Proposal Document</strong> &bull; EventPass IT Portal
+      <span style="font-size: 0.8rem; color: #64748b; margin-left: 0.75rem;">(File URL / location headers automatically removed for PDF export)</span>
+    </div>
+    <div style="display: flex; gap: 0.5rem;">
+      <button class="btn" onclick="window.print()">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2m-4 0v4H8v-4h8z"></path></svg>
+        Print / Clean PDF Export
+      </button>
+    </div>
+  </div>
+
+  <div class="document-container">
+    <div class="header-badge">Capstone / Software Engineering Proposal</div>
+    <h1>EventPass</h1>
+    <div class="subtitle">A Web-Based Event Attendance Management and Automated Certificate Generation System</div>
+
+    <h2>1. Project Metadata & Proponent Information</h2>
+    <table>
+      <tr>
+        <th style="width: 30%;">Project Title</th>
+        <td><strong>EventPass</strong>: Web-Based Event Attendance Management & Certificate Portal</td>
+      </tr>
+      <tr>
+        <th>Proponents</th>
+        <td>[Student Name / Capstone Project Group]</td>
+      </tr>
+      <tr>
+        <th>Degree & Course</th>
+        <td>Bachelor of Science in Information Technology / Computer Science</td>
+      </tr>
+      <tr>
+        <th>Date of Submission</th>
+        <td>September 2026</td>
+      </tr>
+      <tr>
+        <th>Target Platform</th>
+        <td><strong>Web Application (Fully Responsive Desktop & Mobile)</strong></td>
+      </tr>
+    </table>
+
+    <div class="callout">
+      <strong>Platform Rationale:</strong> A responsive web application ensures universal accessibility across Android, iOS, Windows, macOS, and Linux without downloading external apps. Event gatekeepers can immediately use any camera-enabled device as a scanner.
+    </div>
+
+    <h2>2. Project Background & Problem Statement</h2>
+    <p>
+      Academic institutions, student organizations, and professional bodies organize frequent seminars, orientations, and technical conferences. Two major operational pain points persistently disrupt these events:
+    </p>
+    <ol>
+      <li><strong>Bottlenecked Attendance Logging:</strong> Reliance on manual pen-and-paper sign-up lists produces congested registration counters, proxy attendances, illegible handwriting, and lost records.</li>
+      <li><strong>Tedious Post-Event Certificate Distribution:</strong> Manually editing attendee names onto digital templates and emailing them individually takes days or weeks, creating administrative fatigue and lost certificates.</li>
+    </ol>
+    <p>
+      <strong>EventPass</strong> resolves both hurdles by introducing pre-event registration with instant unique QR code passes, live web-camera check-ins, and automated vector-quality PDF certificate generation delivered on demand immediately upon verified attendance.
+    </p>
+
+    <h2>3. Objectives of the Study</h2>
+    <h3>General Objective:</h3>
+    <p>
+      To build a responsive, client-side capable web application that streamlines event attendee registration, enforces secure QR verification at entrance gates, and automates instant personalized certificate distribution.
+    </p>
+
+    <h3>Specific Objectives:</h3>
+    <ul>
+      <li>Create an intuitive registration portal that issues personalized scannable passes upon submission.</li>
+      <li>Incorporate a responsive camera-based QR code scanner capable of validating attendees in less than one second.</li>
+      <li>Prevent unauthorized entries and proxy sign-ins through single-use verification state tracking.</li>
+      <li>Implement an in-browser PDF certificate engine that embeds customized event credentials, official seals, and verification QR stamps.</li>
+      <li>Equip event directors with an analytics dashboard providing real-time turnout metrics and one-click CSV attendance roster exports.</li>
+    </ul>
+
+    <h2>4. System Architecture</h2>
+    <div class="diagram-box">
++------------------------------------------------------------------------+
+|                               EVENTPASS                                |
++------------------------------------------------------------------------+
+       |                                                |
+       v                                                v
+ [ATTENDEE INTERFACE]                          [ORGANIZER DASHBOARD]
+       |                                                |
+       +--> Self-Registration Form                      +--> Real-Time Turnout Analytics
+       +--> Instant QR Pass Generation                  +--> Live Web Camera Scanner
+       +--> Pass Download & Print                       +--> Verification Audit Log
+       +--> Dynamic PDF Certificate Engine              +--> Excel/CSV Attendance Export
+    </div>
+
+    <h2>5. Core Functional Modules</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Module</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>1. Registration & Pass Module</strong></td>
+          <td>Gathers attendee metadata, performs client validation, and renders a unique digital QR pass.</td>
+        </tr>
+        <tr>
+          <td><strong>2. Live Camera Scanner Module</strong></td>
+          <td>Accesses device cameras via WebRTC to read attendee QR passes with instant audio-visual confirmation.</td>
+        </tr>
+        <tr>
+          <td><strong>3. Validation Engine</strong></td>
+          <td>Ensures passes cannot be scanned multiple times and validates token integrity in real time.</td>
+        </tr>
+        <tr>
+          <td><strong>4. Dynamic Certificate Engine</strong></td>
+          <td>Generates high-resolution vector PDF certificates with custom typography, date stamps, and attendee names.</td>
+        </tr>
+        <tr>
+          <td><strong>5. Analytics & Roster Manager</strong></td>
+          <td>Renders real-time check-in stats, searchable attendee lists, and CSV export capabilities.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>6. Technical Specifications</h2>
+    <ul>
+      <li><strong>Frontend Architecture:</strong> HTML5 semantic markup with modern Vanilla CSS styling (Design tokens, Glassmorphism, CSS Grid & Flexbox, responsive breakpoints).</li>
+      <li><strong>Application Logic:</strong> Pure Vanilla JavaScript (ES6+ modular classes, LocalStorage persistence, event delegation).</li>
+      <li><strong>QR Engine:</strong> Canvas-based generator (`QRCode.js`) & camera scanning stream decoder (`Html5-QRCode`).</li>
+      <li><strong>Certificate Rendering:</strong> High-DPI canvas & client-side vector PDF renderer (`jsPDF`).</li>
+      <li><strong>Hosting / Deployment:</strong> Zero-backend serverless hosting on Vercel, Netlify, or GitHub Pages.</li>
+    </ul>
+
+    <h2>7. Implementation Schedule (9 Weeks)</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Weeks</th>
+          <th>Phase</th>
+          <th>Key Deliverables</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Weeks 1–2</td>
+          <td>Requirements & UI/UX Design</td>
+          <td>Wireframes, persona definition, design tokens</td>
+        </tr>
+        <tr>
+          <td>Weeks 3–4</td>
+          <td>Core Portal & Pass Generation</td>
+          <td>Registration form, QR token creation, pass modal</td>
+        </tr>
+        <tr>
+          <td>Weeks 5–6</td>
+          <td>Scanner & Certificate Engine</td>
+          <td>Web camera scanner, dynamic PDF certificate builder</td>
+        </tr>
+        <tr>
+          <td>Weeks 7–8</td>
+          <td>Organizer Analytics & Export</td>
+          <td>KPI cards, roster filters, CSV export, validation</td>
+        </tr>
+        <tr>
+          <td>Week 9</td>
+          <td>Quality Assurance & Defense</td>
+          <td>End-to-end integration testing, capstone presentation</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</body>
+</html>
