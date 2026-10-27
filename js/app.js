@@ -19,22 +19,24 @@ class EventPassController {
   }
 
   init() {
-    // Check saved session or default to demo participant for immediate exploration
+    // Restore a saved session only if the user actually logged in before.
+    // Otherwise start logged out (guest) - no default demo account.
     const savedUser = localStorage.getItem('eventpass_session_user');
+    this.currentUser = null;
     if (savedUser) {
       try {
         const parsed = JSON.parse(savedUser);
         // Re-validate against the shared database (account may be deleted/deactivated on another device)
         const fresh = parsed && window.db.getUserById(parsed.id);
-        this.currentUser = (fresh && fresh.status !== 'inactive') ? fresh : window.db.getUserByEmail('demo.student@student.edu');
+        if (fresh && fresh.status !== 'inactive') {
+          this.currentUser = fresh;
+          localStorage.setItem('eventpass_session_user', JSON.stringify(fresh));
+        } else {
+          localStorage.removeItem('eventpass_session_user');
+        }
       } catch (e) {
-        this.currentUser = window.db.getUserByEmail('demo.student@student.edu');
+        localStorage.removeItem('eventpass_session_user');
       }
-      if (this.currentUser) localStorage.setItem('eventpass_session_user', JSON.stringify(this.currentUser));
-    } else {
-      // Default to participant demo account
-      this.currentUser = window.db.getUserByEmail('demo.student@student.edu');
-      localStorage.setItem('eventpass_session_user', JSON.stringify(this.currentUser));
     }
 
     this.updateUserSessionUI();
