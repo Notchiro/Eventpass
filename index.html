@@ -34,6 +34,7 @@
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 </head>
 
 <body>
@@ -874,13 +875,13 @@
             const p2 = document.getElementById('regConfirmPassword').value;
             if (p1 !== p2) { app.showToast('Passwords do not match.', 'error'); return; }
             try {
-              app.createUserAndLogin({
+              Promise.resolve(app.createUserAndLogin({
                 full_name: document.getElementById('regFullName').value,
                 email: document.getElementById('regEmail').value,
                 password: p1,
                 role: document.getElementById('regRole').value,
                 organization: document.getElementById('regOrg').value
-              });
+              })).catch(e => app.showToast(e.message, 'error'));
             } catch(e) { app.showToast(e.message, 'error'); }
           ">
             <div class="form-group">
@@ -1226,6 +1227,7 @@
 
   <!-- Toast Notification Container -->
   <div id="toastContainer" class="toast-container"></div>
+  <div id="dbLoading" style="position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:#0b1020;color:#fff;font-family:system-ui,sans-serif;">Connecting to database…</div>
 
   <!-- Application Logic Scripts -->
   <script src="js/db.js"></script>
@@ -1239,7 +1241,8 @@
       // Handled in app.js DOMContentLoaded
     }
     // Bind helper on window for registration form
-    EventPassController.prototype.createUserAndLogin = function(userData) {
+    EventPassController.prototype.createUserAndLogin = async function(userData) {
+      userData.password = await window.db.hashPassword(userData.password);
       const newUser = window.db.createUser(userData);
       this.currentUser = newUser;
       localStorage.setItem('eventpass_session_user', JSON.stringify(newUser));
