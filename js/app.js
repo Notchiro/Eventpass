@@ -23,10 +23,14 @@ class EventPassController {
     const savedUser = localStorage.getItem('eventpass_session_user');
     if (savedUser) {
       try {
-        this.currentUser = JSON.parse(savedUser);
+        const parsed = JSON.parse(savedUser);
+        // Re-validate against the shared database (account may be deleted/deactivated on another device)
+        const fresh = parsed && window.db.getUserById(parsed.id);
+        this.currentUser = (fresh && fresh.status !== 'inactive') ? fresh : window.db.getUserByEmail('demo.student@student.edu');
       } catch (e) {
         this.currentUser = window.db.getUserByEmail('demo.student@student.edu');
       }
+      if (this.currentUser) localStorage.setItem('eventpass_session_user', JSON.stringify(this.currentUser));
     } else {
       // Default to participant demo account
       this.currentUser = window.db.getUserByEmail('demo.student@student.edu');
@@ -41,14 +45,17 @@ class EventPassController {
   // --------------------------------------------------------------------------
   // AUTHENTICATION & ROLE SWITCHING
   // --------------------------------------------------------------------------
-  login(email, password) {
+  async login(email, password) {
     const user = window.db.getUserByEmail(email);
     if (!user) {
       this.showToast('Account not found with this email.', 'error');
       return false;
     }
 
-    if (user.password !== password) {
+    let hashed;
+    try { hashed = await window.db.hashPassword(password); }
+    catch (err) { this.showToast(err.message, 'error'); return false; }
+    if (user.password !== hashed) {
       this.showToast('Incorrect password. Please try again.', 'error');
       return false;
     }
@@ -1389,7 +1396,7 @@ class EventPassController {
     document.getElementById('addUserModal').classList.add('active');
   }
 
-  saveAddUser(e) {
+  async saveAddUser(e) {
     e.preventDefault();
     const userData = {
       full_name: document.getElementById('newUserName').value,
@@ -1400,6 +1407,7 @@ class EventPassController {
     };
 
     try {
+      userData.password = await window.db.hashPassword(userData.password);
       window.db.createUser(userData);
       this.showToast(`Account created for ${userData.full_name}.`, 'success');
       document.getElementById('addUserModal').classList.remove('active');
@@ -1524,6 +1532,21 @@ class EventPassController {
 }
 
 // Bootstrap Application
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  const loader = document.getElementById('dbLoading');
+  try {
+    await window.db.ready;
+  } catch (err) {
+    console.error(err);
+    if (loader) {
+      loader.innerHTML = '<div style="max-width:420px;text-align:center;padding:1.5rem;">' +
+        '<h3 style="margin:0 0 .5rem;">Can\'t connect to the database</h3>' +
+        '<p style="margin:0 0 1rem;opacity:.8;font-size:.9rem;"></p>' +
+        '<button onclick="location.reload()" style="padding:.5rem 1.25rem;cursor:pointer;">Retry</button></div>';
+      loader.querySelector('p').textContent = err.message || String(err);
+    }
+    return;
+  }
   window.app = new EventPassController();
+  if (loader) loader.remove();
 });

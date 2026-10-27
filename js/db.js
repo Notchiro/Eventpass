@@ -1,327 +1,143 @@
 /**
- * EventPass Relational Database Engine (Client-Side Storage)
- * Implements the 5 core tables + activity logs with relational integrity,
- * transaction-safe updates, and LocalStorage persistence.
+ * EventPass Relational Database Engine (Supabase / PostgreSQL)
  *
- * Tables:
- * 1. users
- * 2. events
- * 3. registrations
- * 4. attendance
- * 5. certificates
- * 6. activity_logs
+ * Data now lives in a shared Supabase Postgres database, so accounts and events
+ * created on one device are visible on every other device.
+ *
+ * How it works (so the rest of the app can stay synchronous):
+ *  - On startup every table is downloaded into an in-memory cache  -> `db.ready`
+ *  - All reads (getAllUsers, getEventById, ...) read from that cache
+ *  - All writes update the cache immediately and are saved to Supabase in the
+ *    background, in order (write-through)
+ *
+ * Tables: users, events, registrations, attendance, certificates, activity_logs
+ * (create them by running supabase-setup.sql in the Supabase SQL Editor)
  */
+
+const EVENTPASS_SUPABASE_URL = 'https://tceldolmvabqqciiflyr.supabase.co';
+// Publishable (anon) key: safe to ship in front-end code. NEVER put the secret / service_role key here.
+const EVENTPASS_SUPABASE_KEY = 'sb_publishable_yrVpp9mJDBcnEMMyx9NXmQ_C43it8af';
 
 class EventPassDB {
   constructor() {
-    this.storageKeyPrefix = 'eventpass_db_';
-    this.init();
-  }
-
-  init() {
-    if (!this.getTable('users')) {
-      this.seedInitialDatabase();
-    } else {
-      this.migrateLegacyOrganizerName();
-    }
-  }
-
-  // Browsers that opened an older build still hold the previous seeded names / emails.
-  migrateLegacyOrganizerName() {
-    const RENAMES = [
-      ['Prof. Dominic Alcantara', 'Prof. Navarro'],
-      ['Maria Clarissa Santos', 'Demo Student (JM)'],
-      ['maria.santos@student.edu', 'demo.student@student.edu']
-    ];
-    const apply = (raw) => RENAMES.reduce((t, [o, n]) => t.split(o).join(n), raw);
-    ['users', 'events', 'activity_logs'].forEach(table => {
-      const raw = localStorage.getItem(this.storageKeyPrefix + table);
-      if (raw) {
-        const updated = apply(raw);
-        if (updated !== raw) localStorage.setItem(this.storageKeyPrefix + table, updated);
-      }
+    this.tableNames = ['users', 'events', 'registrations', 'attendance', 'certificates', 'activity_logs'];
+    this.tables = {};
+    this.snapshots = {};
+    this.tableNames.forEach(t => { this.tables[t] = []; this.snapshots[t] = new Map(); });
+    this.queue = Promise.resolve();
+    this.client = null;
+    this.ready = this.load();
+    // Avoid an "unhandled rejection" warning; callers handle errors via `await db.ready`.
+    this.ready.catch(() => {});
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') this.refresh().catch(() => {});
     });
-    const sess = localStorage.getItem('eventpass_session_user');
-    if (sess) {
-      const updated = apply(sess);
-      if (updated !== sess) localStorage.setItem('eventpass_session_user', updated);
-    }
   }
 
-  // Generic Table Get / Set
-  getTable(tableName) {
-    try {
-      const raw = localStorage.getItem(this.storageKeyPrefix + tableName);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) {
-      console.error(`Error loading table ${tableName}:`, e);
-      return null;
+  // --------------------------------------------------------------------------
+  // CONNECTION / LOADING
+  // --------------------------------------------------------------------------
+  async load() {
+    if (!window.supabase || !window.supabase.createClient) {
+      throw new Error('Could not load the Supabase library. Check your internet connection and reload.');
     }
+    this.client = window.supabase.createClient(EVENTPASS_SUPABASE_URL, EVENTPASS_SUPABASE_KEY);
+    await this.fetchAll();
+  }
+
+  async fetchAll() {
+    const results = await Promise.all(this.tableNames.map(t => {
+      let q = this.client.from(t).select('*');
+      if (t === 'activity_logs') q = q.order('timestamp', { ascending: false }).order('id', { ascending: false }).limit(100);
+      else if (t === 'events') q = q.order('created_at', { ascending: false });
+      else q = q.order('id', { ascending: true });
+      return q;
+    }));
+    results.forEach((res, i) => {
+      const t = this.tableNames[i];
+      if (res.error) {
+        throw new Error(`Database error while loading "${t}": ${res.error.message}. Did you run supabase-setup.sql?`);
+      }
+      this.tables[t] = res.data || [];
+      this.rebuildSnapshot(t);
+    });
+  }
+
+  // Re-download everything (called when the tab becomes visible again) once pending writes are done.
+  async refresh() {
+    if (!this.client) return;
+    await this.queue;
+    await this.fetchAll();
+  }
+
+  rebuildSnapshot(t) {
+    const snap = new Map();
+    this.tables[t].forEach(row => snap.set(String(row.id), JSON.stringify(row)));
+    this.snapshots[t] = snap;
+  }
+
+  // --------------------------------------------------------------------------
+  // PASSWORD HASHING (never store plain-text passwords)
+  // --------------------------------------------------------------------------
+  async hashPassword(plain) {
+    if (!window.crypto || !window.crypto.subtle) {
+      throw new Error('Secure hashing is unavailable. Open the site over https:// to continue.');
+    }
+    const data = new TextEncoder().encode('eventpass:' + plain);
+    const buf = await window.crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // --------------------------------------------------------------------------
+  // Generic Table Get / Set (cache + write-through to Supabase)
+  // --------------------------------------------------------------------------
+  getTable(tableName) {
+    return this.tables[tableName] || [];
   }
 
   setTable(tableName, data) {
-    try {
-      localStorage.setItem(this.storageKeyPrefix + tableName, JSON.stringify(data));
-    } catch (e) {
-      console.error(`Error saving table ${tableName}:`, e);
-    }
+    this.tables[tableName] = data;
+    if (tableName === 'activity_logs') return; // logs are inserted by logActivity()
+
+    const snap = this.snapshots[tableName];
+    const next = new Map();
+    const upserts = [];
+    data.forEach(row => {
+      const key = String(row.id);
+      const json = JSON.stringify(row);
+      next.set(key, json);
+      if (snap.get(key) !== json) upserts.push(JSON.parse(json));
+    });
+    const deletes = [];
+    snap.forEach((_, key) => { if (!next.has(key)) deletes.push(key); });
+    this.snapshots[tableName] = next;
+
+    if (!upserts.length && !deletes.length) return;
+    this.enqueue(async () => {
+      if (upserts.length) {
+        const { error } = await this.client.from(tableName).upsert(upserts);
+        if (error) throw error;
+      }
+      if (deletes.length) {
+        const { error } = await this.client.from(tableName).delete().in('id', deletes);
+        if (error) throw error;
+      }
+    }, tableName);
   }
 
-  // Seed default demonstration database
-  seedInitialDatabase() {
-    const users = [
-      {
-        id: 'usr-admin-01',
-        full_name: 'System Administrator',
-        email: 'admin@eventpass.edu',
-        password: 'admin',
-        role: 'admin',
-        organization: 'Campus IT Directorate',
-        status: 'active',
-        created_at: '2026-09-01 08:00:00'
-      },
-      {
-        id: 'usr-org-01',
-        full_name: 'Prof. Navarro',
-        email: 'organizer@eventpass.edu',
-        password: 'organizer',
-        role: 'organizer',
-        organization: 'College of Computer Studies',
-        status: 'active',
-        created_at: '2026-09-05 09:30:00'
-      },
-      {
-        id: 'usr-org-02',
-        full_name: 'Campus Student Council',
-        email: 'council@eventpass.edu',
-        password: 'council',
-        role: 'organizer',
-        organization: 'Supreme Student Directorate',
-        status: 'active',
-        created_at: '2026-09-10 14:00:00'
-      },
-      {
-        id: 'usr-part-01',
-        full_name: 'Demo Student (JM)',
-        email: 'demo.student@student.edu',
-        password: 'student',
-        role: 'participant',
-        organization: 'BS Information Technology (3rd Year)',
-        status: 'active',
-        created_at: '2026-09-15 10:15:00'
-      },
-      {
-        id: 'usr-part-02',
-        full_name: 'John Doe',
-        email: 'john.doe@student.edu',
-        password: 'student',
-        role: 'participant',
-        organization: 'BS Computer Science (2nd Year)',
-        status: 'active',
-        created_at: '2026-09-16 11:20:00'
-      },
-      {
-        id: 'usr-part-03',
-        full_name: 'Engr. Jonathan Reyes',
-        email: 'jreyes@innovatecorp.com',
-        password: 'guest',
-        role: 'participant',
-        organization: 'Innovate Solutions Inc. / Alumni Guest',
-        status: 'active',
-        created_at: '2026-09-20 16:40:00'
+  enqueue(job, label) {
+    this.queue = this.queue.then(job).catch(err => {
+      console.error(`Failed to save to Supabase (${label}):`, err);
+      if (window.app && typeof window.app.showToast === 'function') {
+        window.app.showToast('Could not save to the database: ' + (err.message || err), 'error');
       }
-    ];
+    });
+    return this.queue;
+  }
 
-    const events = [
-      {
-        id: 'evt-it-2026',
-        organizer_id: 'usr-org-01',
-        organizer_name: 'Prof. Navarro',
-        title: 'IT Seminar 2026: Future of AI & Cloud Architectures',
-        description: 'An advanced technological symposium exploring cloud computing scalability, deep neural networks, AI agent workflows, and zero-trust perimeter defense in modern enterprise systems.',
-        category: 'Seminar',
-        date: '2026-10-15',
-        start_time: '09:00 AM',
-        end_time: '04:00 PM',
-        venue: 'Main Campus Auditorium & Tech Hall',
-        capacity: 250,
-        banner: 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=1000&auto=format&fit=crop',
-        certificate_template: 'classic-gold',
-        status: 'upcoming',
-        created_at: '2026-09-12 10:00:00'
-      },
-      {
-        id: 'evt-web-2026',
-        organizer_id: 'usr-org-01',
-        organizer_name: 'Prof. Navarro',
-        title: 'Web Development Workshop: Modern Fullstack Engineering',
-        description: 'A hands-on practical masterclass covering scalable Single Page Architecture, responsive design systems, RESTful microservices, and secure client-side database management.',
-        category: 'Workshop',
-        date: '2026-10-22',
-        start_time: '10:00 AM',
-        end_time: '03:30 PM',
-        venue: 'CIT Computer Laboratory 401',
-        capacity: 80,
-        banner: 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=1000&auto=format&fit=crop',
-        certificate_template: 'modern-tech',
-        status: 'upcoming',
-        created_at: '2026-09-18 11:30:00'
-      },
-      {
-        id: 'evt-cyber-2026',
-        organizer_id: 'usr-org-01',
-        organizer_name: 'Prof. Navarro',
-        title: 'Cybersecurity Awareness Seminar: Zero Trust & Ethical Defense',
-        description: 'Crucial seminar addressing modern threat landscape, penetration testing fundamentals, zero-trust infrastructure, and incident response handling for IT students and professionals.',
-        category: 'Seminar',
-        date: '2026-10-28',
-        start_time: '01:00 PM',
-        end_time: '05:00 PM',
-        venue: 'Audio-Visual Center & Hybrid Stream',
-        capacity: 180,
-        banner: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=1000&auto=format&fit=crop',
-        certificate_template: 'academic-blue',
-        status: 'upcoming',
-        created_at: '2026-09-22 09:00:00'
-      },
-      {
-        id: 'evt-lead-2026',
-        organizer_id: 'usr-org-02',
-        organizer_name: 'Campus Student Council',
-        title: 'Student Leadership Conference 2026: Inspiring Innovation',
-        description: 'Annual gathering of student leaders, organization presidents, and youth ambassadors focusing on project execution, public communication, and ethical leadership.',
-        category: 'Conference',
-        date: '2026-11-05',
-        start_time: '08:30 AM',
-        end_time: '05:00 PM',
-        venue: 'University Gymnasium & Grand Stage',
-        capacity: 400,
-        banner: 'https://images.unsplash.com/photo-1475721027785-f74eccf877e2?w=1000&auto=format&fit=crop',
-        certificate_template: 'classic-gold',
-        status: 'upcoming',
-        created_at: '2026-09-25 14:00:00'
-      }
-    ];
-
-    const registrations = [
-      {
-        id: 'reg-001',
-        event_id: 'evt-it-2026',
-        participant_id: 'usr-part-01',
-        qr_code: 'EP-QR:evt-it-2026:usr-part-01:reg-001',
-        registered_at: '2026-10-01 08:30:00',
-        status: 'attended'
-      },
-      {
-        id: 'reg-002',
-        event_id: 'evt-web-2026',
-        participant_id: 'usr-part-01',
-        qr_code: 'EP-QR:evt-web-2026:usr-part-01:reg-002',
-        registered_at: '2026-10-02 09:15:00',
-        status: 'registered'
-      },
-      {
-        id: 'reg-003',
-        event_id: 'evt-it-2026',
-        participant_id: 'usr-part-02',
-        qr_code: 'EP-QR:evt-it-2026:usr-part-02:reg-003',
-        registered_at: '2026-10-01 10:00:00',
-        status: 'registered'
-      },
-      {
-        id: 'reg-004',
-        event_id: 'evt-it-2026',
-        participant_id: 'usr-part-03',
-        qr_code: 'EP-QR:evt-it-2026:usr-part-03:reg-004',
-        registered_at: '2026-10-01 11:20:00',
-        status: 'attended'
-      }
-    ];
-
-    const attendance = [
-      {
-        id: 'att-001',
-        event_id: 'evt-it-2026',
-        participant_id: 'usr-part-01',
-        registration_id: 'reg-001',
-        check_in_time: '08:45:12 AM',
-        scanned_by: 'usr-org-01',
-        status: 'verified'
-      },
-      {
-        id: 'att-002',
-        event_id: 'evt-it-2026',
-        participant_id: 'usr-part-03',
-        registration_id: 'reg-004',
-        check_in_time: '08:52:40 AM',
-        scanned_by: 'usr-org-01',
-        status: 'verified'
-      }
-    ];
-
-    const certificates = [
-      {
-        id: 'cert-001',
-        event_id: 'evt-it-2026',
-        participant_id: 'usr-part-01',
-        certificate_id: 'CERT-2026-IT-98214',
-        issued_at: '2026-10-15 09:00:00',
-        certificate_file: 'EP-Certificate-Demo-Student-JM.pdf'
-      },
-      {
-        id: 'cert-002',
-        event_id: 'evt-it-2026',
-        participant_id: 'usr-part-03',
-        certificate_id: 'CERT-2026-IT-48190',
-        issued_at: '2026-10-15 09:10:00',
-        certificate_file: 'EP-Certificate-Engr-Jonathan-Reyes.pdf'
-      }
-    ];
-
-    const activity_logs = [
-      {
-        id: 1,
-        user_email: 'admin@eventpass.edu',
-        action: 'SYSTEM_INITIALIZE',
-        details: 'EventPass core relational database initialized with demo seeds.',
-        timestamp: '2026-10-01 08:00:00'
-      },
-      {
-        id: 2,
-        user_email: 'organizer@eventpass.edu',
-        action: 'CREATE_EVENT',
-        details: 'Created new event: IT Seminar 2026: Future of AI & Cloud Architectures',
-        timestamp: '2026-10-01 08:15:00'
-      },
-      {
-        id: 3,
-        user_email: 'demo.student@student.edu',
-        action: 'EVENT_REGISTRATION',
-        details: 'Participant registered for IT Seminar 2026. Generated ticket reg-001.',
-        timestamp: '2026-10-01 08:30:00'
-      },
-      {
-        id: 4,
-        user_email: 'organizer@eventpass.edu',
-        action: 'ATTENDANCE_CHECKIN',
-        details: 'Scanned QR code for Demo Student (JM). Attendance confirmed.',
-        timestamp: '2026-10-15 08:45:12'
-      },
-      {
-        id: 5,
-        user_email: 'demo.student@student.edu',
-        action: 'CERTIFICATE_GENERATION',
-        details: 'Automated certificate CERT-2026-IT-98214 generated and issued.',
-        timestamp: '2026-10-15 09:00:00'
-      }
-    ];
-
-    this.setTable('users', users);
-    this.setTable('events', events);
-    this.setTable('registrations', registrations);
-    this.setTable('attendance', attendance);
-    this.setTable('certificates', certificates);
-    this.setTable('activity_logs', activity_logs);
+  // Random numeric suffix used in ticket / attendance / certificate ids
+  randId() {
+    return Math.floor(100000 + Math.random() * 900000);
   }
 
   // --------------------------------------------------------------------------
@@ -347,6 +163,10 @@ class EventPassDB {
     const existing = users.find(u => u.email.toLowerCase() === userData.email.trim().toLowerCase());
     if (existing) {
       throw new Error('An account with this email address already exists.');
+    }
+
+    if (!/^[0-9a-f]{64}$/.test(userData.password || '')) {
+      throw new Error('Password must be hashed with db.hashPassword() before saving.');
     }
 
     const newUser = {
@@ -505,7 +325,7 @@ class EventPassDB {
       throw new Error('Registration closed: Event has reached maximum capacity.');
     }
 
-    const regId = 'reg-' + Math.floor(1000 + Math.random() * 9000);
+    const regId = 'reg-' + this.randId();
     // Unique QR Code payload structure: EP-QR:[EVENT_ID]:[PARTICIPANT_ID]:[REG_ID]
     const qrPayload = `EP-QR:${eventId}:${participantId}:${regId}`;
 
@@ -605,7 +425,7 @@ class EventPassDB {
     // Record verified attendance
     const nowTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const newAttendance = {
-      id: 'att-' + Math.floor(1000 + Math.random() * 9000),
+      id: 'att-' + this.randId(),
       event_id: eventId,
       participant_id: participantId,
       registration_id: regId,
@@ -667,7 +487,7 @@ class EventPassDB {
       // Mark as verified attended
       const nowTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       attendanceList.push({
-        id: 'att-' + Math.floor(1000 + Math.random() * 9000),
+        id: 'att-' + this.randId(),
         event_id: eventId,
         participant_id: participantId,
         registration_id: regId,
@@ -729,7 +549,7 @@ class EventPassDB {
 
     const certSerial = 'EP-CERT-' + new Date().getFullYear() + '-' + Math.floor(10000 + Math.random() * 90000);
     const newCert = {
-      id: 'cert-' + Math.floor(1000 + Math.random() * 9000),
+      id: 'cert-' + this.randId(),
       event_id: eventId,
       participant_id: participantId,
       certificate_id: certSerial,
@@ -750,18 +570,21 @@ class EventPassDB {
   }
 
   logActivity(userEmail, action, details) {
-    const logs = this.getActivityLogs();
-    const newLog = {
-      id: logs.length + 1,
+    const entry = {
       user_email: userEmail,
       action: action,
       details: details,
       timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19)
     };
-    logs.unshift(newLog);
-    // Keep last 100 logs
+    // Local cache copy (temporary id; the real id is assigned by the database)
+    const logs = this.getActivityLogs();
+    logs.unshift({ id: 'local-' + Date.now() + '-' + logs.length, ...entry });
     if (logs.length > 100) logs.pop();
-    this.setTable('activity_logs', logs);
+    this.tables.activity_logs = logs;
+    this.enqueue(async () => {
+      const { error } = await this.client.from('activity_logs').insert(entry);
+      if (error) throw error;
+    }, 'activity_logs');
   }
 
   // --------------------------------------------------------------------------
@@ -975,5 +798,5 @@ class EventPassDB {
   }
 }
 
-// Global Database Singleton
+// Global Database Singleton (the app waits for `db.ready` before starting)
 window.db = new EventPassDB();
